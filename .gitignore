@@ -3,7 +3,7 @@ bin/
 obj/
 artifacts/
 Library/
-Communes/node_modules/
+UI/node_modules/
 
 *.suo
 *.user

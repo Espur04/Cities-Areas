@@ -111,6 +111,7 @@ namespace Communes
                 [m_Setting.GetOptionLabelLocaleID(nameof(Setting.Units))] = text[8],
                 [m_Setting.GetOptionDescLocaleID(nameof(Setting.Units))] = text[9],
                 [m_Setting.GetOptionLabelLocaleID(nameof(Setting.Version))] = LocaleText.VersionLabel(selectedLocale),
+                [m_Setting.GetOptionDescLocaleID(nameof(Setting.Version))] = LocaleText.VersionDescription(selectedLocale),
                 [m_Setting.GetOptionLabelLocaleID(nameof(Setting.ToggleToolBinding))] = text[10],
                 [m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleToolBinding))] = text[11],
                 [m_Setting.GetBindingKeyLocaleID(Mod.kToggleToolActionName)] = text[12],
@@ -210,6 +211,25 @@ private static readonly string[][] s_Text =
                 case "ru-RU": return "Версия";
                 case "zh-HANT": return "版本";
                 default: return "Version";
+            }
+        }
+
+        public static string VersionDescription(string locale)
+        {
+            switch (locale)
+            {
+                case "fr-FR": return "Version installée du mod.";
+                case "es-ES": return "Versión instalada del mod.";
+                case "it-IT": return "Versione installata della mod.";
+                case "zh-HANS": return "已安装的模组版本。";
+                case "de-DE": return "Installierte Version der Mod.";
+                case "ja-JP": return "インストールされているMODのバージョンです。";
+                case "pl-PL": return "Zainstalowana wersja modyfikacji.";
+                case "pt-BR": return "Versão instalada do mod.";
+                case "ko-KR": return "설치된 모드 버전입니다.";
+                case "ru-RU": return "Установленная версия мода.";
+                case "zh-HANT": return "已安裝的模組版本。";
+                default: return "Installed mod version.";
             }
         }
 

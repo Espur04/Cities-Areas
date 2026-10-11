@@ -11,7 +11,7 @@
 Create and manage independent municipal areas alongside the game's districts. Municipal areas can overlap districts and buildings, display their own names and resident totals, and provide a dedicated tool for drawing and editing their boundaries. Includes configurable language, area units, and a keyboard shortcut.
 	</LongDescription>
 	<!--Thumbnail-->
-	<Thumbnail Value="Properties/Thumbnail.png" />
+	<Thumbnail Value="Resources/Thumbnail.png" />
 	<!--Screenshot, can be set multiple times-->
 	<Screenshot Value="" />
 	<!--Tag, can be set multiple times-->
