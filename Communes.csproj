@@ -76,4 +76,9 @@
 		<None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
 	</ItemGroup>
 
+	<Target Name="BuildCommunesUI" AfterTargets="DeployWIP" Condition="'$(NeedBuild)' == 'true'">
+		<Error Condition="!Exists('$(MSBuildProjectDirectory)\UI\node_modules\.bin\webpack.cmd')" Text="UI dependencies are missing. Run 'npm ci' in the UI directory before building or publishing." />
+		<Exec WorkingDirectory="$(MSBuildProjectDirectory)\UI" Command="npm run build" />
+	</Target>
+
 </Project>
