@@ -1,0 +1,12 @@
+.vs/
+bin/
+obj/
+artifacts/
+Library/
+Communes/node_modules/
+
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.log
