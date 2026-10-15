@@ -22,11 +22,13 @@ public partial class CommuneSectionRegistrar : GameSystemBase
             }
 
             CommuneResidentsSection residents = World.GetOrCreateSystemManaged<CommuneResidentsSection>();
+            CommuneHappinessSection happiness = World.GetOrCreateSystemManaged<CommuneHappinessSection>();
             CommunePanelSection panel = World.GetOrCreateSystemManaged<CommunePanelSection>();
             DistrictAreaSection districtArea = World.GetOrCreateSystemManaged<DistrictAreaSection>();
 
-            bool addedMiddle = EnsurePresent(ui, kMiddleSectionsField, residents);
+            bool addedMiddle = EnsurePresent(ui, kMiddleSectionsField, happiness);
             addedMiddle |= EnsurePresent(ui, kMiddleSectionsField, panel);
+            addedMiddle |= EnsurePresent(ui, kMiddleSectionsField, residents);
             addedMiddle |= EnsurePresent(ui, kMiddleSectionsField, districtArea);
 
             if (addedMiddle && !m_LoggedOnce)

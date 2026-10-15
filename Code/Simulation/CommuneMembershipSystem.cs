@@ -3,6 +3,7 @@ using Colossal.Serialization.Entities;
 using Game;
 using Game.Areas;
 using Game.Buildings;
+using Game.Citizens;
 using Game.Common;
 using Game.Objects;
 using Game.Tools;
@@ -15,11 +16,19 @@ namespace Communes
 
 public partial class CommuneMembershipSystem : GameSystemBase
     {
+        private const int kInitialBuildingsPerUpdate = 512;
         private EntityQuery m_CommuneQuery;
         private EntityQuery m_BuildingQuery;
         private EntityQuery m_ChangedBuildingQuery;
+        private EntityQuery m_ChangedHouseholdQuery;
         private NativeParallelHashMap<Entity, uint> m_CommuneGeometryHashes;
         private NativeParallelHashMap<Entity, float3> m_BuildingPositions;
+        private NativeArray<Entity> m_InitialCommunes;
+        private NativeArray<Entity> m_InitialBuildings;
+        private int m_InitialBuildingIndex;
+        private bool m_InitialSyncComplete;
+        private CommuneStatsSystem m_StatsSystem;
+        private int m_UpdateTick;
         private int m_CleanupTick;
 
         protected override void OnCreate()
@@ -30,15 +39,22 @@ public partial class CommuneMembershipSystem : GameSystemBase
                 ComponentType.ReadOnly<Node>(), ComponentType.ReadOnly<Triangle>(),
                 ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Temp>());
             m_BuildingQuery = GetEntityQuery(
-                ComponentType.ReadOnly<Building>(),
+                ComponentType.ReadOnly<Building>(), ComponentType.ReadOnly<ResidentialProperty>(),
                 ComponentType.ReadOnly<Transform>(), ComponentType.Exclude<Deleted>(),
                 ComponentType.Exclude<Temp>());
             m_ChangedBuildingQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Updated>(), ComponentType.ReadOnly<Building>(),
-                    ComponentType.ReadOnly<Transform>() },
+                    ComponentType.ReadOnly<ResidentialProperty>(), ComponentType.ReadOnly<Transform>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() }
             });
+            m_ChangedHouseholdQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Household>(), ComponentType.ReadOnly<HouseholdCitizen>(),
+                    ComponentType.ReadOnly<Game.Buildings.PropertyRenter>() },
+                None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() }
+            });
+            m_ChangedHouseholdQuery.SetChangedVersionFilter(ComponentType.ReadOnly<HouseholdCitizen>());
             m_CommuneGeometryHashes = new NativeParallelHashMap<Entity, uint>(16, Allocator.Persistent);
             m_BuildingPositions = new NativeParallelHashMap<Entity, float3>(256, Allocator.Persistent);
         }
@@ -49,6 +65,7 @@ public partial class CommuneMembershipSystem : GameSystemBase
                 m_CommuneGeometryHashes.Dispose();
             if (m_BuildingPositions.IsCreated)
                 m_BuildingPositions.Dispose();
+            DisposeInitialSyncArrays();
             base.OnDestroy();
         }
 
@@ -58,11 +75,25 @@ public partial class CommuneMembershipSystem : GameSystemBase
 
 m_CommuneGeometryHashes.Clear();
             m_BuildingPositions.Clear();
+            DisposeInitialSyncArrays();
+            m_InitialBuildingIndex = 0;
+            m_InitialSyncComplete = false;
+            m_UpdateTick = 0;
             m_CleanupTick = 0;
         }
 
         protected override void OnUpdate()
         {
+            if (!m_InitialSyncComplete)
+            {
+                ProcessInitialSyncSlice();
+                return;
+            }
+
+            ProcessChangedHouseholds();
+            if (m_UpdateTick++ % 8 != 0)
+                return;
+
             if (m_CommuneQuery.IsEmptyIgnoreFilter)
             {
                 m_CommuneGeometryHashes.Clear();
@@ -125,9 +156,16 @@ if (anyRebuild)
                     }
 
                     m_CommuneGeometryHashes[commune] = geometryHashes[c];
+                    m_StatsSystem?.MarkDirty(commune);
                 }
 
-changedBuildings = m_ChangedBuildingQuery.ToEntityArray(Allocator.Temp);
+                bool reconcileAllBuildings = m_CleanupTick % 8 == 0;
+                m_CleanupTick++;
+                if (reconcileAllBuildings && !allBuildings.IsCreated)
+                    allBuildings = m_BuildingQuery.ToEntityArray(Allocator.Temp);
+
+                if (!m_ChangedBuildingQuery.IsEmptyIgnoreFilter)
+                    changedBuildings = m_ChangedBuildingQuery.ToEntityArray(Allocator.Temp);
                 int requiredBuildingCapacity = m_BuildingPositions.Count() + changedBuildings.Length * 2;
                 if (m_BuildingPositions.Capacity < requiredBuildingCapacity)
                     m_BuildingPositions.Capacity = math.max(256, requiredBuildingCapacity);
@@ -136,21 +174,29 @@ changedBuildings = m_ChangedBuildingQuery.ToEntityArray(Allocator.Temp);
                     Entity building = changedBuildings[b];
                     if (!EntityManager.TryGetComponent(building, out Transform transform))
                         continue;
-
                     float3 position = transform.m_Position;
-                    for (int c = 0; c < communes.Length; c++)
-                    {
-                        Entity commune = communes[c];
-                        Geometry geometry = EntityManager.GetComponentData<Geometry>(commune);
-                        DynamicBuffer<Node> nodes = EntityManager.GetBuffer<Node>(commune, true);
-                        DynamicBuffer<Triangle> triangles = EntityManager.GetBuffer<Triangle>(commune, true);
-                        bool inside = CommuneGeometry.Contains(geometry.m_Bounds, nodes, triangles, position);
-                        SetMembership(commune, building, inside);
-                    }
-                    m_BuildingPositions[building] = position;
+                    if (!m_BuildingPositions.TryGetValue(building, out float3 previousPosition)
+                        || math.distancesq(position, previousPosition) > 0.01f)
+                        UpdateBuildingMembership(communes, building, position);
                 }
 
-if (m_CleanupTick++ % 64 == 0)
+                if (reconcileAllBuildings)
+                {
+                    if (m_BuildingPositions.Capacity < allBuildings.Length * 2)
+                        m_BuildingPositions.Capacity = math.max(256, allBuildings.Length * 2);
+                    for (int b = 0; b < allBuildings.Length; b++)
+                    {
+                        Entity building = allBuildings[b];
+                        if (!EntityManager.TryGetComponent(building, out Transform transform))
+                            continue;
+                        float3 position = transform.m_Position;
+                        if (!m_BuildingPositions.TryGetValue(building, out float3 previousPosition)
+                            || math.distancesq(position, previousPosition) > 0.01f)
+                            UpdateBuildingMembership(communes, building, position);
+                    }
+                }
+
+if (reconcileAllBuildings)
                 {
                     RemoveStaleBuildings(communes);
                     RemoveStaleCommunes();
@@ -168,7 +214,125 @@ if (m_CleanupTick++ % 64 == 0)
             }
         }
 
-        private void SetMembership(Entity commune, Entity building, bool inside)
+        private void ProcessInitialSyncSlice()
+        {
+            if (!m_InitialCommunes.IsCreated)
+            {
+                if (m_CommuneQuery.IsEmptyIgnoreFilter)
+                {
+                    m_CommuneGeometryHashes.Clear();
+                    m_BuildingPositions.Clear();
+                    m_InitialSyncComplete = true;
+                    return;
+                }
+
+                m_InitialCommunes = m_CommuneQuery.ToEntityArray(Allocator.Persistent);
+                m_InitialBuildings = m_BuildingQuery.ToEntityArray(Allocator.Persistent);
+                m_InitialBuildingIndex = 0;
+                if (m_CommuneGeometryHashes.Capacity < m_InitialCommunes.Length * 2)
+                    m_CommuneGeometryHashes.Capacity = math.max(16, m_InitialCommunes.Length * 2);
+                if (m_BuildingPositions.Capacity < m_InitialBuildings.Length * 2)
+                    m_BuildingPositions.Capacity = math.max(256, m_InitialBuildings.Length * 2);
+
+                for (int c = 0; c < m_InitialCommunes.Length; c++)
+                {
+                    Entity commune = m_InitialCommunes[c];
+                    if (!EntityManager.HasBuffer<CommuneBuildingMember>(commune))
+                        EntityManager.AddBuffer<CommuneBuildingMember>(commune);
+                    EntityManager.GetBuffer<CommuneBuildingMember>(commune).Clear();
+                    m_CommuneGeometryHashes[commune] = GetGeometryHash(commune);
+                }
+            }
+
+            int end = math.min(m_InitialBuildingIndex + kInitialBuildingsPerUpdate, m_InitialBuildings.Length);
+            for (int b = m_InitialBuildingIndex; b < end; b++)
+            {
+                Entity building = m_InitialBuildings[b];
+                if (!EntityManager.TryGetComponent(building, out Transform transform))
+                    continue;
+
+                float3 position = transform.m_Position;
+                for (int c = 0; c < m_InitialCommunes.Length; c++)
+                {
+                    Entity commune = m_InitialCommunes[c];
+                    Geometry geometry = EntityManager.GetComponentData<Geometry>(commune);
+                    DynamicBuffer<Node> nodes = EntityManager.GetBuffer<Node>(commune, true);
+                    DynamicBuffer<Triangle> triangles = EntityManager.GetBuffer<Triangle>(commune, true);
+                    if (CommuneGeometry.Contains(geometry.m_Bounds, nodes, triangles, position))
+                        EntityManager.GetBuffer<CommuneBuildingMember>(commune).Add(new CommuneBuildingMember { m_Building = building });
+                }
+                m_BuildingPositions[building] = position;
+            }
+
+            m_InitialBuildingIndex = end;
+            if (m_InitialBuildingIndex < m_InitialBuildings.Length)
+                return;
+
+            for (int c = 0; c < m_InitialCommunes.Length; c++)
+                m_StatsSystem?.MarkDirty(m_InitialCommunes[c]);
+            DisposeInitialSyncArrays();
+            m_InitialSyncComplete = true;
+        }
+
+        private void DisposeInitialSyncArrays()
+        {
+            if (m_InitialCommunes.IsCreated)
+                m_InitialCommunes.Dispose();
+            if (m_InitialBuildings.IsCreated)
+                m_InitialBuildings.Dispose();
+            m_InitialCommunes = default;
+            m_InitialBuildings = default;
+        }
+
+        private void ProcessChangedHouseholds()
+        {
+            if (m_CommuneQuery.IsEmptyIgnoreFilter || m_ChangedHouseholdQuery.IsEmptyIgnoreFilter)
+                return;
+
+            NativeArray<Entity> households = m_ChangedHouseholdQuery.ToEntityArray(Allocator.Temp);
+            NativeArray<Entity> communes = m_CommuneQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                for (int h = 0; h < households.Length; h++)
+                {
+                    Entity household = households[h];
+                    if (!EntityManager.TryGetComponent(household, out Game.Buildings.PropertyRenter propertyRenter))
+                        continue;
+                    Entity building = propertyRenter.m_Property;
+                    if (!EntityManager.TryGetComponent(building, out Transform transform))
+                        continue;
+
+                    float3 position = transform.m_Position;
+                    if (!m_BuildingPositions.TryGetValue(building, out float3 previousPosition)
+                        || math.distancesq(position, previousPosition) > 0.01f)
+                    {
+                        UpdateBuildingMembership(communes, building, position, true);
+                        continue;
+                    }
+
+                    for (int c = 0; c < communes.Length; c++)
+                    {
+                        Entity commune = communes[c];
+                        Geometry geometry = EntityManager.GetComponentData<Geometry>(commune);
+                        DynamicBuffer<Node> nodes = EntityManager.GetBuffer<Node>(commune, true);
+                        DynamicBuffer<Triangle> triangles = EntityManager.GetBuffer<Triangle>(commune, true);
+                        if (CommuneGeometry.Contains(geometry.m_Bounds, nodes, triangles, position))
+                        {
+                            if (m_StatsSystem == null)
+                                m_StatsSystem = World.GetOrCreateSystemManaged<CommuneStatsSystem>();
+                            m_StatsSystem.MarkDirty(commune);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                households.Dispose();
+                communes.Dispose();
+            }
+        }
+
+        private void SetMembership(Entity commune, Entity building, bool inside, bool statsChanged)
         {
             DynamicBuffer<CommuneBuildingMember> members = EntityManager.GetBuffer<CommuneBuildingMember>(commune);
             int found = -1;
@@ -181,10 +345,38 @@ if (m_CleanupTick++ % 64 == 0)
                 }
             }
 
+            bool membershipChanged = false;
             if (inside && found < 0)
+            {
                 members.Add(new CommuneBuildingMember { m_Building = building });
+                membershipChanged = true;
+            }
             else if (!inside && found >= 0)
+            {
                 members.RemoveAtSwapBack(found);
+                membershipChanged = true;
+            }
+
+            if (membershipChanged || (statsChanged && inside))
+            {
+                if (m_StatsSystem == null)
+                    m_StatsSystem = World.GetOrCreateSystemManaged<CommuneStatsSystem>();
+                m_StatsSystem.MarkDirty(commune);
+            }
+        }
+
+        private void UpdateBuildingMembership(NativeArray<Entity> communes, Entity building, float3 position, bool statsChanged = false)
+        {
+            for (int c = 0; c < communes.Length; c++)
+            {
+                Entity commune = communes[c];
+                Geometry geometry = EntityManager.GetComponentData<Geometry>(commune);
+                DynamicBuffer<Node> nodes = EntityManager.GetBuffer<Node>(commune, true);
+                DynamicBuffer<Triangle> triangles = EntityManager.GetBuffer<Triangle>(commune, true);
+                SetMembership(commune, building,
+                    CommuneGeometry.Contains(geometry.m_Bounds, nodes, triangles, position), statsChanged);
+            }
+            m_BuildingPositions[building] = position;
         }
 
         private void RemoveStaleBuildings(NativeArray<Entity> communes)
@@ -261,4 +453,5 @@ if (m_CleanupTick++ % 64 == 0)
         public void Serialize<TWriter>(TWriter writer) where TWriter : IWriter => writer.Write(m_Building);
         public void Deserialize<TReader>(TReader reader) where TReader : IReader => reader.Read(out m_Building);
     }
+
 }

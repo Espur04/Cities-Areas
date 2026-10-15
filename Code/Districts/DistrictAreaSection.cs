@@ -13,6 +13,7 @@ using Game.UI.InGame;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Burst.Intrinsics;
 
 namespace Communes
 {
@@ -21,6 +22,7 @@ namespace Communes
     {
         public const string TypeName = "Communes.DistrictAreaSection";
         private EntityQuery m_BuildingQuery;
+        private NativeArray<int> m_Results;
         private float m_Area;
         private int m_Residents;
         private Entity m_CachedDistrict = Entity.Null;
@@ -32,8 +34,17 @@ namespace Communes
         {
             base.OnCreate();
             m_BuildingQuery = GetEntityQuery(ComponentType.ReadOnly<Building>(),
-                ComponentType.ReadOnly<CurrentDistrict>(), ComponentType.ReadOnly<PrefabRef>(),
+                ComponentType.ReadOnly<ResidentialProperty>(), ComponentType.ReadOnly<CurrentDistrict>(),
+                ComponentType.ReadOnly<PrefabRef>(), ComponentType.ReadOnly<Renter>(),
                 ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Temp>());
+            m_Results = new NativeArray<int>(1, Allocator.Persistent);
+        }
+
+        protected override void OnDestroy()
+        {
+            if (m_Results.IsCreated)
+                m_Results.Dispose();
+            base.OnDestroy();
         }
 
         protected override void Reset()
@@ -71,43 +82,83 @@ namespace Communes
 
         private int CountResidents(Entity district)
         {
-            NativeArray<Entity> buildings = m_BuildingQuery.ToEntityArray(Allocator.Temp);
-            int total = 0;
-            try
+            m_Results[0] = 0;
+            JobChunkExtensions.Schedule(new CountDistrictResidentsJob
             {
-                for (int i = 0; i < buildings.Length; i++)
+                m_SelectedDistrict = district,
+                m_EntityHandle = GetEntityTypeHandle(),
+                m_CurrentDistrictHandle = GetComponentTypeHandle<CurrentDistrict>(true),
+                m_PrefabRefHandle = GetComponentTypeHandle<PrefabRef>(true),
+                m_ParkLookup = GetComponentLookup<Game.Buildings.Park>(true),
+                m_AbandonedLookup = GetComponentLookup<Abandoned>(true),
+                m_PropertyDataLookup = GetComponentLookup<BuildingPropertyData>(true),
+                m_HouseholdLookup = GetComponentLookup<Household>(true),
+                m_HouseholdCitizenLookup = GetBufferLookup<HouseholdCitizen>(true),
+                m_RenterLookup = GetBufferLookup<Renter>(true),
+                m_HealthProblemLookup = GetComponentLookup<HealthProblem>(true),
+                m_TravelPurposeLookup = GetComponentLookup<TravelPurpose>(true),
+                m_Results = m_Results,
+            }, m_BuildingQuery, Dependency).Complete();
+            return m_Results[0];
+        }
+
+        private struct CountDistrictResidentsJob : IJobChunk
+        {
+            [ReadOnly] public Entity m_SelectedDistrict;
+            [ReadOnly] public EntityTypeHandle m_EntityHandle;
+            [ReadOnly] public ComponentTypeHandle<CurrentDistrict> m_CurrentDistrictHandle;
+            [ReadOnly] public ComponentTypeHandle<PrefabRef> m_PrefabRefHandle;
+            [ReadOnly] public ComponentLookup<Game.Buildings.Park> m_ParkLookup;
+            [ReadOnly] public ComponentLookup<Abandoned> m_AbandonedLookup;
+            [ReadOnly] public ComponentLookup<BuildingPropertyData> m_PropertyDataLookup;
+            [ReadOnly] public ComponentLookup<Household> m_HouseholdLookup;
+            [ReadOnly] public BufferLookup<HouseholdCitizen> m_HouseholdCitizenLookup;
+            [ReadOnly] public BufferLookup<Renter> m_RenterLookup;
+            [ReadOnly] public ComponentLookup<HealthProblem> m_HealthProblemLookup;
+            [ReadOnly] public ComponentLookup<TravelPurpose> m_TravelPurposeLookup;
+            public NativeArray<int> m_Results;
+
+            public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask,
+                in v128 chunkEnabledMask)
+            {
+                NativeArray<Entity> entities = chunk.GetNativeArray(m_EntityHandle);
+                NativeArray<CurrentDistrict> districts = chunk.GetNativeArray(ref m_CurrentDistrictHandle);
+                NativeArray<PrefabRef> prefabs = chunk.GetNativeArray(ref m_PrefabRefHandle);
+                int residents = 0;
+                for (int i = 0; i < entities.Length; i++)
                 {
-                    Entity building = buildings[i];
-                    if (EntityManager.GetComponentData<CurrentDistrict>(building).m_District != district)
+                    if (districts[i].m_District != m_SelectedDistrict)
                         continue;
 
-                    bool abandoned = EntityManager.HasComponent<Abandoned>(building);
-                    bool park = EntityManager.HasComponent<Game.Buildings.Park>(building);
-                    PrefabRef prefabRef = EntityManager.GetComponentData<PrefabRef>(building);
-                    bool residential = EntityManager.TryGetComponent(prefabRef.m_Prefab, out BuildingPropertyData property)
+                    Entity building = entities[i];
+                    bool abandoned = m_AbandonedLookup.HasComponent(building);
+                    bool park = m_ParkLookup.HasComponent(building);
+                    bool residential = m_PropertyDataLookup.TryGetComponent(prefabs[i].m_Prefab, out BuildingPropertyData property)
                         && property.m_ResidentialProperties > 0 && !abandoned;
-                    if (!EntityManager.TryGetBuffer(building, true, out DynamicBuffer<Renter> renters)
-                        || renters.Length == 0 || !(residential || park || abandoned))
+                    if (!(residential || park || abandoned)
+                        || !m_RenterLookup.TryGetBuffer(building, out DynamicBuffer<Renter> renters)
+                        || renters.Length == 0)
                         continue;
 
                     for (int r = 0; r < renters.Length; r++)
                     {
                         Entity household = renters[r].m_Renter;
-                        if (!EntityManager.HasComponent<Household>(household)
-                            || !EntityManager.TryGetBuffer(household, true, out DynamicBuffer<HouseholdCitizen> citizens))
+                        if (!m_HouseholdLookup.HasComponent(household)
+                            || !m_HouseholdCitizenLookup.TryGetBuffer(household, out DynamicBuffer<HouseholdCitizen> citizens))
                             continue;
                         for (int c = 0; c < citizens.Length; c++)
                         {
-                            Entity citizen = citizens[c].m_Citizen;
-                            if (EntityManager.HasComponent<Citizen>(citizen)
-                                && !CitizenUtils.IsCorpsePickedByHearse(EntityManager, citizen))
-                                total++;
+                            if (!CitizenUtils.IsCorpsePickedByHearse(citizens[c].m_Citizen,
+                                ref m_HealthProblemLookup, ref m_TravelPurposeLookup))
+                                residents++;
                         }
                     }
                 }
+                m_Results[0] += residents;
             }
-            finally { buildings.Dispose(); }
-            return total;
+
+            void IJobChunk.Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask,
+                in v128 chunkEnabledMask) => Execute(in chunk, unfilteredChunkIndex, useEnabledMask, in chunkEnabledMask);
         }
 
         private static float Cross(float2 a, float2 b) => a.x * b.y - a.y * b.x;

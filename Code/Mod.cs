@@ -18,7 +18,7 @@ namespace Communes
         private Setting m_Setting;
         public static ProxyAction m_ToggleToolAction;
         public static Setting CurrentSetting { get; private set; }
-        public const string kVersion = "1.0.0";
+        public const string kVersion = "1.1.0";
         public const string kToggleToolActionName = "ToggleMunicipalAreasTool";
 
         public static InterfaceLanguage EffectiveLanguage
@@ -68,8 +68,6 @@ updateSystem.UpdateAt<CommuneAreaToolSystem>(SystemUpdatePhase.ToolUpdate);
             updateSystem.UpdateAt<CommunesSystem>(SystemUpdatePhase.GameSimulation);
 
 updateSystem.UpdateAt<CommuneMembershipSystem>(SystemUpdatePhase.GameSimulation);
-            updateSystem.UpdateBefore<CommuneMembershipSystem, CommuneStatsSystem>(SystemUpdatePhase.GameSimulation);
-            updateSystem.UpdateAt<CommuneStatsSystem>(SystemUpdatePhase.GameSimulation);
 
             updateSystem.UpdateAt<CommuneSectionRegistrar>(SystemUpdatePhase.UIUpdate);
 

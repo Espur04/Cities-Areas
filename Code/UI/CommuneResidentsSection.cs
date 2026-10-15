@@ -21,7 +21,7 @@ namespace Communes
 public partial class CommuneResidentsSection : InfoSectionBase, IJsonWritable
     {
 
-        private const string kNativeType = "Game.UI.InGame.ResidentsSection";
+        private const string kNativeType = "Communes.CommuneWealthSection";
 
         private CommuneStatsSystem m_StatsSystem;
 
@@ -35,6 +35,9 @@ private bool isHousehold;
         private CommuneWealthData wealthData;
         private AgeData ageData;
         private EducationData educationData;
+        private Entity m_CachedCommune = Entity.Null;
+        private HouseholdWealthKey m_CachedWealthKey;
+        private CommuneWealthData m_CachedWealthData;
 
         protected override string group => "CommuneResidents";
 
@@ -71,6 +74,8 @@ Entity selected = selectedEntity;
 
 visible = true;
 
+            bool statsRefreshed = m_StatsSystem.Refresh(selected);
+
             if (!m_StatsSystem.Results.TryGetValue(selected, out CommuneStats stats))
             {
                 return;
@@ -84,19 +89,21 @@ visible = true;
             ageData = stats.Age;
             educationData = stats.Education;
 
-if (stats.Households.IsCreated)
+            if (selected != m_CachedCommune || statsRefreshed)
             {
-                wealthKey = CitizenUIUtils.GetAverageHouseholdWealth(
-                    EntityManager,
-                    stats.Households,
-                    m_StatsSystem.CityHappinessParameters);
+                m_CachedCommune = selected;
+                m_CachedWealthKey = stats.Households.IsCreated
+                    ? CitizenUIUtils.GetAverageHouseholdWealth(EntityManager,
+                        stats.Households, m_StatsSystem.CityHappinessParameters)
+                    : default;
+
+                m_CachedWealthData = default;
+                for (int i = 0; stats.Households.IsCreated && i < stats.Households.Length; i++)
+                    m_CachedWealthData += GetHouseholdEconomyData(stats.Households[i]);
             }
 
-wealthData = default;
-            for (int i = 0; stats.Households.IsCreated && i < stats.Households.Length; i++)
-            {
-                wealthData += GetHouseholdEconomyData(stats.Households[i]);
-            }
+            wealthKey = m_CachedWealthKey;
+            wealthData = m_CachedWealthData;
         }
 
 protected override void OnProcess()
@@ -162,6 +169,8 @@ private CommuneWealthData GetHouseholdEconomyData(Entity household)
 
         public override void OnWriteProperties(IJsonWriter writer)
         {
+            writer.PropertyName("language");
+            writer.Write((int)Mod.EffectiveLanguage);
             writer.PropertyName("isHousehold");
             writer.Write(isHousehold);
             writer.PropertyName("isDistrict");

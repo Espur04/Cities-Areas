@@ -32,6 +32,9 @@ namespace Communes
         private Entity m_CachedCommune = Entity.Null;
         private uint m_CachedGeometryHash;
         private List<Row> m_Districts = new List<Row>();
+        private Dictionary<Entity, Entity> m_BuildingDistricts = new Dictionary<Entity, Entity>();
+        private int m_CachedMembershipCount = -1;
+        private uint m_CachedStatsRevision;
 
         protected override string group => "CommunePanelSection";
 
@@ -68,13 +71,25 @@ namespace Communes
             }
 
             visible = true;
+            CommuneStatsSystem statsSystem = World.GetOrCreateSystemManaged<CommuneStatsSystem>();
+            statsSystem.Refresh(commune);
+            uint statsRevision = statsSystem.GetRefreshRevision(commune);
+            int membershipCount = EntityManager.HasBuffer<CommuneBuildingMember>(commune)
+                ? EntityManager.GetBuffer<CommuneBuildingMember>(commune, true).Length : 0;
             uint hash = GeometryHash(commune);
-            if (commune != m_CachedCommune || hash != m_CachedGeometryHash || m_CachedTicks-- <= 0)
+            if (commune != m_CachedCommune || hash != m_CachedGeometryHash
+                || membershipCount != m_CachedMembershipCount || m_CachedTicks-- <= 0)
             {
                 m_CachedCommune = commune;
                 m_CachedGeometryHash = hash;
-                m_CachedTicks = 60;
+                m_CachedTicks = 300;
                 Rebuild(commune);
+                m_CachedStatsRevision = statsRevision;
+            }
+            else if (statsRevision != m_CachedStatsRevision)
+            {
+                RefreshResidentCounts(commune);
+                m_CachedStatsRevision = statsRevision;
             }
         }
 
@@ -90,6 +105,7 @@ namespace Communes
         private void Rebuild(Entity commune)
         {
             m_Districts.Clear();
+            m_BuildingDistricts.Clear();
             Geometry communeGeometry = EntityManager.GetComponentData<Geometry>(commune);
             DynamicBuffer<Node> communeNodes = EntityManager.GetBuffer<Node>(commune, true);
             DynamicBuffer<Triangle> communeTriangles = EntityManager.GetBuffer<Triangle>(commune, true);
@@ -119,6 +135,7 @@ namespace Communes
                         || !EntityManager.HasComponent<Building>(building)
                         || !TryGetNativeRenters(building, out DynamicBuffer<Renter> renters)) continue;
                     Entity district = FindDistrictForBuilding(building, districtEntities, candidateDistricts);
+                    m_BuildingDistricts[building] = district;
                     for (int r = 0; r < renters.Length; r++)
                     {
                         Entity household = renters[r].m_Renter;
@@ -164,15 +181,62 @@ namespace Communes
                 m_UnassignedResidents = math.max(0, totalResidents - residentsInDisplayedDistricts);
 
                 m_UnassignedDensity = m_UnassignedArea > 0f ? (int)(m_UnassignedResidents * 1000000f / m_UnassignedArea) : 0;
+                m_CachedMembershipCount = EntityManager.HasBuffer<CommuneBuildingMember>(commune)
+                    ? EntityManager.GetBuffer<CommuneBuildingMember>(commune, true).Length : 0;
             }
             finally { districts.Dispose(); }
 
         }
 
+        private void RefreshResidentCounts(Entity commune)
+        {
+            Dictionary<Entity, int> residentsByDistrict = new Dictionary<Entity, int>();
+            int residentsInDisplayedDistricts = 0;
+            DynamicBuffer<CommuneBuildingMember> members = EntityManager.GetBuffer<CommuneBuildingMember>(commune, true);
+            for (int i = 0; i < members.Length; i++)
+            {
+                Entity building = members[i].m_Building;
+                if (!EntityManager.Exists(building) || EntityManager.HasComponent<Deleted>(building)
+                    || !EntityManager.HasComponent<Building>(building)
+                    || !TryGetNativeRenters(building, out DynamicBuffer<Renter> renters))
+                    continue;
+
+                Entity district = m_BuildingDistricts.TryGetValue(building, out Entity assigned) ? assigned : Entity.Null;
+                if (district == Entity.Null)
+                    continue;
+                for (int r = 0; r < renters.Length; r++)
+                {
+                    Entity household = renters[r].m_Renter;
+                    if (!EntityManager.HasComponent<Household>(household)
+                        || !EntityManager.TryGetBuffer(household, true, out DynamicBuffer<HouseholdCitizen> citizens))
+                        continue;
+                    for (int c = 0; c < citizens.Length; c++)
+                    {
+                        Entity citizen = citizens[c].m_Citizen;
+                        if (!EntityManager.TryGetComponent(citizen, out Citizen citizenData)
+                            || CitizenUtils.IsCorpsePickedByHearse(EntityManager, citizen))
+                            continue;
+                        residentsByDistrict.TryGetValue(district, out int current);
+                        residentsByDistrict[district] = current + 1;
+                    }
+                }
+            }
+
+            for (int i = 0; i < m_Districts.Count; i++)
+            {
+                Row row = m_Districts[i];
+                residentsByDistrict.TryGetValue(row.Entity, out row.Residents);
+                residentsInDisplayedDistricts += row.Residents;
+                m_Districts[i] = row;
+            }
+            m_UnassignedResidents = math.max(0, m_StatsPopulation() - residentsInDisplayedDistricts);
+            m_UnassignedDensity = m_UnassignedArea > 0f ? (int)(m_UnassignedResidents * 1000000f / m_UnassignedArea) : 0;
+        }
+
         private Entity FindDistrictForBuilding(Entity building, HashSet<Entity> districts, List<Entity> candidateDistricts)
         {
 
-if (EntityManager.TryGetComponent(building, out CurrentDistrict currentDistrict)
+            if (EntityManager.TryGetComponent(building, out CurrentDistrict currentDistrict)
                 && districts.Contains(currentDistrict.m_District)
                 && ContainsBuilding(currentDistrict.m_District, building))
                 return currentDistrict.m_District;
@@ -211,7 +275,8 @@ if (EntityManager.TryGetComponent(building, out CurrentDistrict currentDistrict)
                 && EntityManager.TryGetComponent(prefabRef.m_Prefab, out BuildingPropertyData propertyData)
                 && propertyData.m_ResidentialProperties > 0;
             bool hasRenters = EntityManager.TryGetBuffer(building, true, out renters) && renters.Length > 0;
-            return hasRenters && ((eligiblePrefab && !abandoned) || park || abandoned);
+            return EntityManager.HasComponent<ResidentialProperty>(building)
+                && hasRenters && ((eligiblePrefab && !abandoned) || park || abandoned);
         }
 
         private static bool BoundsOverlap(Bounds3 a, Bounds3 b) => a.min.x <= b.max.x && a.max.x >= b.min.x && a.min.z <= b.max.z && a.max.z >= b.min.z;
@@ -295,6 +360,14 @@ private static float IntersectionArea(DynamicBuffer<Node> aNodes, DynamicBuffer<
             writer.PropertyName("units"); writer.Write((int)Mod.EffectiveUnits);
             writer.PropertyName("area"); writer.Write(m_Area);
             writer.PropertyName("residents"); writer.Write(m_StatsPopulation());
+            CommuneStats stats = default;
+            if (World.GetOrCreateSystemManaged<CommuneStatsSystem>().Results.TryGetValue(selectedEntity, out CommuneStats cachedStats))
+                stats = cachedStats;
+            writer.PropertyName("households"); writer.Write(stats.HouseholdCount);
+            writer.PropertyName("maxHouseholds"); writer.Write(stats.MaxHouseholds);
+            writer.PropertyName("animals"); writer.Write(stats.PetCount);
+            writer.PropertyName("ageData"); writer.Write(stats.Age);
+            writer.PropertyName("educationData"); writer.Write(stats.Education);
             writer.PropertyName("density"); writer.Write(m_Area > 0f ? (int)(m_StatsPopulation() * 1000000f / m_Area) : 0);
             writer.PropertyName("unassignedArea"); writer.Write(m_UnassignedArea);
             writer.PropertyName("unassignedResidents"); writer.Write(m_UnassignedResidents);

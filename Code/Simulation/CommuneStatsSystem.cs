@@ -10,22 +10,23 @@ using Game.Tools;
 using Game.UI.InGame;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Jobs;
 using Unity.Mathematics;
 using Colossal.Serialization.Entities;
+using System;
+using System.Collections.Generic;
 
 namespace Communes
 {
 
 public partial class CommuneStatsSystem : GameSystemBase
     {
-        private EntityQuery m_CommuneQuery;
-        private EntityQuery m_ResidentialCountQuery;
         private EntityQuery m_HappinessParameterQuery;
 
 private NativeParallelHashMap<Entity, CommuneStats> m_Results;
-
-private int m_DiagnosticTick;
-        private int m_UpdatesUntilRecalculation;
+        private readonly Dictionary<Entity, long> m_LastRefreshTime = new Dictionary<Entity, long>();
+        private readonly HashSet<Entity> m_DirtyCommunes = new HashSet<Entity>();
+        private readonly Dictionary<Entity, uint> m_RefreshRevisions = new Dictionary<Entity, uint>();
 
         public NativeParallelHashMap<Entity, CommuneStats> Results => m_Results;
 
@@ -59,20 +60,7 @@ public Entity City
         {
             base.OnCreate();
 
-m_CommuneQuery = GetEntityQuery(
-                ComponentType.ReadOnly<Commune>(),
-                ComponentType.ReadOnly<Geometry>(),
-                ComponentType.ReadOnly<Node>(),
-                ComponentType.ReadOnly<Triangle>(),
-                ComponentType.Exclude<Deleted>(),
-                ComponentType.Exclude<Temp>());
-
-            m_ResidentialCountQuery = GetEntityQuery(
-                ComponentType.ReadOnly<Building>(), ComponentType.ReadOnly<PrefabRef>(),
-                ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Temp>());
-
             m_HappinessParameterQuery = GetEntityQuery(ComponentType.ReadOnly<CitizenHappinessParameterData>());
-
             m_Results = new NativeParallelHashMap<Entity, CommuneStats>(16, Allocator.Persistent);
 
             Mod.log.Info("[Communes] CommuneStatsSystem initialisé.");
@@ -94,157 +82,123 @@ m_CommuneQuery = GetEntityQuery(
             foreach (var entry in m_Results)
                 entry.Value.Dispose();
             m_Results.Clear();
-            m_UpdatesUntilRecalculation = 0;
-            m_DiagnosticTick = 0;
+            m_LastRefreshTime.Clear();
+            m_DirtyCommunes.Clear();
+            m_RefreshRevisions.Clear();
         }
 
         protected override void OnUpdate()
         {
-
-            if (m_CommuneQuery.IsEmptyIgnoreFilter)
-            {
-                m_UpdatesUntilRecalculation = 0;
-                return;
-            }
-
-if (m_UpdatesUntilRecalculation > 0)
-            {
-                m_UpdatesUntilRecalculation--;
-                return;
-            }
-            m_UpdatesUntilRecalculation = 31;
-
-            NativeArray<Entity> communes = m_CommuneQuery.ToEntityArray(Allocator.Temp);
-
-if (m_DiagnosticTick++ % 256 == 0)
-            {
-                Mod.log.Info($"[Communes][Diag] {communes.Length} commune(s) détectée(s), "
-                    + $"{m_ResidentialCountQuery.CalculateEntityCount()} bâtiment(s) résidentiel(s) indexé(s).");
-            }
-
-for (int i = 0; i < communes.Length; i++)
-            {
-                Entity commune = communes[i];
-                if (m_Results.TryGetValue(commune, out CommuneStats existing))
-                {
-                    existing.Reset();
-                    m_Results[commune] = existing;
-                }
-                else
-                {
-                    m_Results[commune] = CommuneStats.Create(Allocator.Persistent);
-                }
-            }
-
-for (int c = 0; c < communes.Length; c++)
-            {
-                bool hasHappinessParameters = !m_HappinessParameterQuery.IsEmptyIgnoreFilter;
-                Entity commune = communes[c];
-                if (!EntityManager.HasBuffer<CommuneBuildingMember>(commune))
-                    continue;
-
-                DynamicBuffer<CommuneBuildingMember> members = EntityManager.GetBuffer<CommuneBuildingMember>(commune, true);
-                for (int b = 0; b < members.Length; b++)
-                {
-                    Entity building = members[b].m_Building;
-                    if (!EntityManager.Exists(building)
-                        || EntityManager.HasComponent<Deleted>(building)
-                        || EntityManager.HasComponent<Temp>(building)
-                        || !EntityManager.HasComponent<Building>(building))
-                    {
-                        continue;
-                    }
-                    if (!TryCountNativeResidentialBuilding(building)) continue;
-                    Accumulate(commune, building, hasHappinessParameters);
-                }
-            }
-
-            communes.Dispose();
         }
 
-private void Accumulate(Entity commune, Entity building, bool hasHappinessParameters)
+        public bool Refresh(Entity commune)
         {
-            CommuneStats stats = m_Results[commune];
-            stats.BuildingCount++;
+            long now = DateTime.UtcNow.Ticks;
+            bool hasResult = m_Results.ContainsKey(commune);
+            bool dirty = m_DirtyCommunes.Contains(commune);
+            if (hasResult && !dirty
+                && m_LastRefreshTime.TryGetValue(commune, out long previous)
+                && now - previous < TimeSpan.FromSeconds(30).Ticks)
+                return false;
+            if (hasResult && dirty && m_LastRefreshTime.TryGetValue(commune, out previous)
+                && now - previous < TimeSpan.TicksPerSecond)
+                return false;
 
-            if (EntityManager.TryGetComponent(building, out PrefabRef prefabRef))
+            m_LastRefreshTime[commune] = now;
+            if (!EntityManager.Exists(commune)
+                || !EntityManager.HasComponent<Commune>(commune)
+                || !EntityManager.HasBuffer<CommuneBuildingMember>(commune))
+                return false;
+
+            if (m_Results.TryGetValue(commune, out CommuneStats existing))
             {
-                BuildingPropertyData propertyData;
-                if (EntityManager.TryGetComponent(prefabRef.m_Prefab, out propertyData))
-                {
-
-                    stats.MaxHouseholds += math.max(propertyData.m_ResidentialProperties, 0);
-                }
+                existing.Reset();
+                m_Results[commune] = existing;
+            }
+            else
+            {
+                m_Results[commune] = CommuneStats.Create(Allocator.Persistent);
             }
 
-            if (EntityManager.TryGetBuffer(building, true, out DynamicBuffer<Renter> renters))
+            bool hasHappinessParameters = !m_HappinessParameterQuery.IsEmptyIgnoreFilter;
+            DynamicBuffer<CommuneBuildingMember> members = EntityManager.GetBuffer<CommuneBuildingMember>(commune, true);
+            NativeArray<CommuneBuildingMember> memberArray = members.AsNativeArray();
+            NativeArray<CommuneBuildingStats> buildingStats = new NativeArray<CommuneBuildingStats>(members.Length, Allocator.TempJob);
+            try
             {
-                for (int i = 0; i < renters.Length; i++)
+                if (members.Length > 0)
                 {
-                    Entity household = renters[i].m_Renter;
-
-if (!EntityManager.HasComponent<Household>(household))
+                    new CommuneBuildingStatsJob
                     {
-                        continue;
-                    }
+                        Members = memberArray,
+                        Buildings = GetComponentLookup<Building>(true),
+                        ResidentialProperties = GetComponentLookup<ResidentialProperty>(true),
+                        Deleted = GetComponentLookup<Deleted>(true),
+                        Temp = GetComponentLookup<Temp>(true),
+                        PrefabRefs = GetComponentLookup<PrefabRef>(true),
+                        PropertyData = GetComponentLookup<BuildingPropertyData>(true),
+                        Parks = GetComponentLookup<Game.Buildings.Park>(true),
+                        Abandoned = GetComponentLookup<Abandoned>(true),
+                        Households = GetComponentLookup<Household>(true),
+                        Renters = GetBufferLookup<Renter>(true),
+                        HouseholdCitizens = GetBufferLookup<HouseholdCitizen>(true),
+                        HouseholdAnimals = GetBufferLookup<HouseholdAnimal>(true),
+                        Citizens = GetComponentLookup<Citizen>(true),
+                        HealthProblems = GetComponentLookup<HealthProblem>(true),
+                        TravelPurposes = GetComponentLookup<TravelPurpose>(true),
+                        HappinessParametersAvailable = hasHappinessParameters,
+                        Results = buildingStats,
+                    }.Schedule(members.Length, 64, Dependency).Complete();
+                }
 
-                    if (!EntityManager.TryGetBuffer(household, true, out DynamicBuffer<HouseholdCitizen> citizens))
-                    {
-                        continue;
-                    }
+                CommuneStats stats = m_Results[commune];
+                for (int b = 0; b < members.Length; b++)
+                {
+                    CommuneBuildingStats building = buildingStats[b];
+                    stats.BuildingCount += building.BuildingCount;
+                    stats.HouseholdCount += building.HouseholdCount;
+                    stats.MaxHouseholds += building.MaxHouseholds;
+                    stats.ResidentCount += building.ResidentCount;
+                    stats.PetCount += building.PetCount;
+                    stats.HappinessSum += building.HappinessSum;
+                    stats.HappinessCitizenCount += building.HappinessCitizenCount;
+                    stats.Age += building.Age;
+                    stats.Education += building.Education;
+                    CollectHouseholds(members[b].m_Building, ref stats);
+                }
+                m_Results[commune] = stats;
+                m_RefreshRevisions.TryGetValue(commune, out uint revision);
+                m_RefreshRevisions[commune] = revision + 1;
+            }
+            finally
+            {
+                buildingStats.Dispose();
+            }
+            m_DirtyCommunes.Remove(commune);
+            return true;
+        }
 
-                    stats.HouseholdCount++;
+        public void MarkDirty(Entity commune) => m_DirtyCommunes.Add(commune);
+
+        public uint GetRefreshRevision(Entity commune) =>
+            m_RefreshRevisions.TryGetValue(commune, out uint revision) ? revision : 0;
+
+        private void CollectHouseholds(Entity building, ref CommuneStats stats)
+        {
+            if (!EntityManager.Exists(building)
+                || EntityManager.HasComponent<Deleted>(building)
+                || EntityManager.HasComponent<Temp>(building)
+                || !TryCountNativeResidentialBuilding(building)
+                || !EntityManager.TryGetBuffer(building, true, out DynamicBuffer<Renter> renters))
+                return;
+
+            for (int i = 0; i < renters.Length; i++)
+            {
+                Entity household = renters[i].m_Renter;
+                if (EntityManager.HasComponent<Household>(household)
+                    && EntityManager.HasBuffer<HouseholdCitizen>(household))
                     stats.Households.Add(household);
-
-                    for (int j = 0; j < citizens.Length; j++)
-                    {
-                        Entity citizenEntity = citizens[j].m_Citizen;
-
-                        if (!EntityManager.TryGetComponent(citizenEntity, out Citizen citizen))
-                        {
-                            continue;
-                        }
-
-if (CitizenUtils.IsCorpsePickedByHearse(EntityManager, citizenEntity))
-                        {
-                            continue;
-                        }
-
-                        stats.ResidentCount++;
-
-                        switch (citizen.GetAge())
-                        {
-                            case CitizenAge.Child:
-                                stats.Age += new AgeData(1, 0, 0, 0);
-                                break;
-                            case CitizenAge.Teen:
-                                stats.Age += new AgeData(0, 1, 0, 0);
-                                break;
-                            case CitizenAge.Adult:
-                                stats.Age += new AgeData(0, 0, 1, 0);
-                                break;
-                            case CitizenAge.Elderly:
-                                stats.Age += new AgeData(0, 0, 0, 1);
-                                break;
-                        }
-
-                        stats.Education += EducationFor(citizen);
-
-if (hasHappinessParameters && !CitizenUtils.IsDead(EntityManager, citizenEntity))
-                        {
-                            stats.HappinessSum += citizen.Happiness;
-                            stats.HappinessCitizenCount++;
-                        }
-                    }
-
-                    if (EntityManager.TryGetBuffer(household, true, out DynamicBuffer<HouseholdAnimal> animals))
-                    {
-                        stats.PetCount += animals.Length;
-                    }
-                }
             }
-
-            m_Results[commune] = stats;
         }
 
 private bool TryCountNativeResidentialBuilding(Entity building)
@@ -256,7 +210,8 @@ private bool TryCountNativeResidentialBuilding(Entity building)
             bool hasResidentialPrefab = EntityManager.TryGetComponent(building, out PrefabRef prefabRef)
                 && EntityManager.TryGetComponent(prefabRef.m_Prefab, out BuildingPropertyData propertyData)
                 && propertyData.m_ResidentialProperties > 0;
-            return hasRenters && ((hasResidentialPrefab && !abandoned) || park || abandoned);
+            return EntityManager.HasComponent<ResidentialProperty>(building)
+                && hasRenters && ((hasResidentialPrefab && !abandoned) || park || abandoned);
         }
 
 private static EducationData EducationFor(Citizen citizen)
