@@ -4,9 +4,11 @@ using Game;
 using Game.Areas;
 using Game.Buildings;
 using Game.Citizens;
+using Game.Companies;
 using Game.Common;
 using Game.Objects;
 using Game.Tools;
+using Game.UI.InGame;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -38,14 +40,19 @@ public partial class CommuneMembershipSystem : GameSystemBase
                 ComponentType.ReadOnly<Commune>(), ComponentType.ReadOnly<Geometry>(),
                 ComponentType.ReadOnly<Node>(), ComponentType.ReadOnly<Triangle>(),
                 ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Temp>());
-            m_BuildingQuery = GetEntityQuery(
-                ComponentType.ReadOnly<Building>(), ComponentType.ReadOnly<ResidentialProperty>(),
-                ComponentType.ReadOnly<Transform>(), ComponentType.Exclude<Deleted>(),
-                ComponentType.Exclude<Temp>());
+            m_BuildingQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Building>(), ComponentType.ReadOnly<Transform>() },
+                Any = new[] { ComponentType.ReadOnly<ResidentialProperty>(), ComponentType.ReadOnly<Renter>(),
+                    ComponentType.ReadOnly<WorkProvider>() },
+                None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() }
+            });
             m_ChangedBuildingQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Updated>(), ComponentType.ReadOnly<Building>(),
-                    ComponentType.ReadOnly<ResidentialProperty>(), ComponentType.ReadOnly<Transform>() },
+                    ComponentType.ReadOnly<Transform>() },
+                Any = new[] { ComponentType.ReadOnly<ResidentialProperty>(), ComponentType.ReadOnly<Renter>(),
+                    ComponentType.ReadOnly<WorkProvider>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() }
             });
             m_ChangedHouseholdQuery = GetEntityQuery(new EntityQueryDesc

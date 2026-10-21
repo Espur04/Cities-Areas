@@ -2,6 +2,7 @@ using Colossal.IO.AssetDatabase;
 using Colossal.Logging;
 using Game;
 using Game.Areas;
+using Game.Common;
 using Game.Input;
 using Game.Modding;
 using Game.Prefabs;
@@ -9,16 +10,18 @@ using Game.Rendering;
 using Game.SceneFlow;
 using Game.Settings;
 using Game.Tools;
+using Game.UI.InGame;
+using System.IO;
 
 namespace Communes
 {
     public class Mod : IMod
     {
-        public static ILog log = LogManager.GetLogger($"{nameof(Communes)}.{nameof(Mod)}").SetShowsErrorsInUI(false);
+        public static ILog log = LogManager.GetLogger($"CitiesAreas.{nameof(Mod)}").SetShowsErrorsInUI(false);
         private Setting m_Setting;
         public static ProxyAction m_ToggleToolAction;
         public static Setting CurrentSetting { get; private set; }
-        public const string kVersion = "1.1.0";
+        public const string kVersion = "1.1.2";
         public const string kToggleToolActionName = "ToggleMunicipalAreasTool";
 
         public static InterfaceLanguage EffectiveLanguage
@@ -64,13 +67,13 @@ updateSystem.UpdateAt<CommuneToolPrefabSystem>(SystemUpdatePhase.PrefabUpdate);
             updateSystem.UpdateAfter<CommuneAreaGeometrySystem, AreaInitializeSystem>(SystemUpdatePhase.PrefabUpdate);
 
 updateSystem.UpdateAt<CommuneAreaToolSystem>(SystemUpdatePhase.ToolUpdate);
+            updateSystem.UpdateBefore<CommuneOverlapErrorSystem, CommuneAreaToolSystem>(SystemUpdatePhase.ToolUpdate);
             updateSystem.UpdateAt<CommuneShortcutSystem>(SystemUpdatePhase.ToolUpdate);
             updateSystem.UpdateAt<CommunesSystem>(SystemUpdatePhase.GameSimulation);
 
 updateSystem.UpdateAt<CommuneMembershipSystem>(SystemUpdatePhase.GameSimulation);
 
             updateSystem.UpdateAt<CommuneSectionRegistrar>(SystemUpdatePhase.UIUpdate);
-
 updateSystem.UpdateAt<CommuneIdentitySystem>(SystemUpdatePhase.PreCulling);
             updateSystem.UpdateAfter<CommuneIdentitySystem, CommuneAreaBufferQuerySystem>(SystemUpdatePhase.PreCulling);
             updateSystem.UpdateBefore<CommuneIdentitySystem, AreaBufferSystem>(SystemUpdatePhase.PreCulling);
@@ -89,9 +92,11 @@ updateSystem.UpdateAt<CommuneAreaMaterialSystem>(SystemUpdatePhase.Rendering);
             if (GameManager.instance.modManager.TryGetExecutableAsset(this, out var asset))
                 log.Info($"Current mod asset at {asset.path}");
 
+            MigrateLegacySettings();
+
             m_Setting = new Setting(this);
             m_Setting.RegisterKeyBindings();
-            AssetDatabase.global.LoadSettings(nameof(Communes), m_Setting, new Setting(this));
+            AssetDatabase.global.LoadSettings("CitiesAreas", m_Setting, new Setting(this));
             CurrentSetting = m_Setting;
             string[] locales = { "en-US", "fr-FR", "es-ES", "it-IT", "zh-HANS", "de-DE", "ja-JP", "pl-PL", "pt-BR", "ko-KR", "ru-RU", "zh-HANT" };
             foreach (string locale in locales)
@@ -111,6 +116,46 @@ updateSystem.UpdateAt<CommuneAreaMaterialSystem>(SystemUpdatePhase.Rendering);
                 CurrentSetting = null;
             }
             m_ToggleToolAction = null;
+        }
+
+        private static void MigrateLegacySettings()
+        {
+            string dataPath = UnityEngine.Application.persistentDataPath;
+            string legacyPath = Path.Combine(dataPath, "Communes.coc");
+            string currentPath = Path.Combine(dataPath, "CitiesAreas.coc");
+
+            try
+            {
+                if (!File.Exists(legacyPath))
+                    return;
+
+                if (!File.Exists(currentPath))
+                {
+                    string contents = File.ReadAllText(legacyPath);
+                    int headerEnd = contents.IndexOfAny(new[] { '\r', '\n' });
+                    if (headerEnd < 0 || contents.Substring(0, headerEnd).Trim() != "Communes")
+                    {
+                        log.Warn("Legacy settings file could not be migrated; leaving it in place.");
+                        return;
+                    }
+
+                    string migrated = "CitiesAreas" + contents.Substring(headerEnd);
+                    string temporaryPath = currentPath + ".migration";
+                    File.WriteAllText(temporaryPath, migrated);
+                    File.Move(temporaryPath, currentPath);
+                }
+
+                File.Delete(legacyPath);
+                log.Info("Settings migrated from Communes.coc to CitiesAreas.coc.");
+            }
+            catch (IOException exception)
+            {
+                log.Warn($"Settings migration failed: {exception.Message}");
+            }
+            catch (System.UnauthorizedAccessException exception)
+            {
+                log.Warn($"Settings migration failed: {exception.Message}");
+            }
         }
     }
 }

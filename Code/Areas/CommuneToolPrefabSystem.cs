@@ -21,9 +21,9 @@ private int m_OnPreloadCount;
 
 private ulong m_RegisteredWorldSignature = ulong.MaxValue;
 
-public const string GroupName = "Zones Toolbar Group";
+public const string GroupName = "Areas";
 
-public const string ToolIconName = "Media/Game/Icons/Districts.svg";
+public const string ToolIconName = "coui://ui-mods/images/tool.svg";
 
 public const string ToolPrefabName = "CommuneTool";
 
@@ -141,8 +141,8 @@ private void CreateToolPrefab(string caller)
 var group = ResolveGroup(GroupName);
             if (group == null)
             {
-                m_Log.Warn($"[Communes] Groupe natif \"{GroupName}\" non résolu pour l'instant ; " +
-                           "nouvelle tentative au prochain chargement.");
+                m_Log.Warn($"[Communes] Menu natif « {GroupName} » non résolu pour l'instant ; " +
+                           "l'outil ne sera pas ajouté à la barre principale.");
                 return;
             }
 
@@ -240,6 +240,13 @@ bool inNativeGroup = false;
 
 private UIGroupPrefab ResolveGroup(string groupName)
         {
+            if (m_PrefabSystem.TryGetPrefab(
+                    new PrefabID(nameof(UIAssetCategoryPrefab), groupName, default),
+                    out PrefabBase categoryPrefab) && categoryPrefab is UIAssetCategoryPrefab category)
+            {
+                return category;
+            }
+
             if (m_PrefabSystem.TryGetPrefab(
                     new PrefabID(nameof(UIToolbarGroupPrefab), groupName, default),
                     out PrefabBase prefab) && prefab is UIGroupPrefab group)

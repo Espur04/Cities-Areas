@@ -2,6 +2,8 @@
 
 	<PropertyGroup>
 		<Configurations>Debug;Release</Configurations>
+		<AssemblyName>Communes</AssemblyName>
+		<RootNamespace>Communes</RootNamespace>
 	
 		<!--The file where mod information which is required for publishing mod on PDX mods are stored-->
 		<PublishConfigurationPath>Resources\PublishConfiguration.xml</PublishConfigurationPath>

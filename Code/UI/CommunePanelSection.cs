@@ -6,12 +6,15 @@ using Game;
 using Game.Areas;
 using Game.Buildings;
 using Game.Citizens;
+using Game.Companies;
 using Game.Common;
+using Game.Economy;
 using Game.Objects;
 using Game.Prefabs;
 using Game.Tools;
 using Game.UI;
 using Game.UI.InGame;
+using Game.Zones;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -28,6 +31,11 @@ namespace Communes
         private float m_UnassignedArea;
         private int m_UnassignedResidents;
         private int m_UnassignedDensity;
+        private int m_EmployeeCount;
+        private int m_MaxEmployees;
+        private EmploymentData m_EducationDataEmployees;
+        private EmploymentData m_EducationDataWorkplaces;
+        private int m_EmployeeRefreshTicks;
         private int m_CachedTicks;
         private Entity m_CachedCommune = Entity.Null;
         private uint m_CachedGeometryHash;
@@ -85,12 +93,116 @@ namespace Communes
                 m_CachedTicks = 300;
                 Rebuild(commune);
                 m_CachedStatsRevision = statsRevision;
+                m_EmployeeRefreshTicks = 0;
             }
             else if (statsRevision != m_CachedStatsRevision)
             {
                 RefreshResidentCounts(commune);
                 m_CachedStatsRevision = statsRevision;
             }
+
+            if (m_EmployeeRefreshTicks-- <= 0)
+            {
+                RefreshEmployees(commune);
+                m_EmployeeRefreshTicks = 30;
+            }
+        }
+
+        private void RefreshEmployees(Entity commune)
+        {
+            m_EmployeeCount = 0;
+            m_MaxEmployees = 0;
+            m_EducationDataEmployees = default;
+            m_EducationDataWorkplaces = default;
+            if (!EntityManager.TryGetBuffer(commune, true, out DynamicBuffer<CommuneBuildingMember> members))
+                return;
+
+            for (int i = 0; i < members.Length; i++)
+            {
+                Entity building = members[i].m_Building;
+                if (!EntityManager.Exists(building)
+                    || EntityManager.HasComponent<Deleted>(building)
+                    || EntityManager.HasComponent<Temp>(building)
+                    || !EntityManager.HasComponent<Building>(building)
+                    || !EntityManager.TryGetComponent(building, out PrefabRef buildingPrefab)
+                    || !HasEmployment(building, buildingPrefab.m_Prefab))
+                    continue;
+
+                Entity workplace = GetWorkplaceEntity(building);
+                if (!EntityManager.TryGetBuffer(workplace, true, out DynamicBuffer<Employee> employees)
+                    || !EntityManager.TryGetComponent(workplace, out WorkProvider provider)
+                    || !EntityManager.TryGetComponent(workplace, out PrefabRef workplacePrefab)
+                    || !EntityManager.TryGetComponent(workplacePrefab.m_Prefab, out WorkplaceData workplaceData))
+                    continue;
+
+                int buildingLevel = 1;
+                if (EntityManager.TryGetComponent(buildingPrefab.m_Prefab, out SpawnableBuildingData spawnable))
+                {
+                    buildingLevel = spawnable.m_Level;
+                }
+                else if (EntityManager.TryGetComponent(building, out PropertyRenter propertyRenter)
+                    && EntityManager.TryGetComponent(propertyRenter.m_Property, out PrefabRef propertyPrefab)
+                    && EntityManager.TryGetComponent(propertyPrefab.m_Prefab, out SpawnableBuildingData propertySpawnable))
+                {
+                    buildingLevel = propertySpawnable.m_Level;
+                }
+
+                EmploymentData workplacesData = EmploymentData.GetWorkplacesData(
+                    provider.m_MaxWorkers, buildingLevel, workplaceData.m_Complexity);
+                m_EmployeeCount += employees.Length;
+                m_MaxEmployees += workplacesData.total;
+                m_EducationDataWorkplaces += workplacesData;
+                m_EducationDataEmployees += EmploymentData.GetEmployeesData(
+                    employees, workplacesData.total - employees.Length);
+            }
+        }
+
+        private bool HasEmployment(Entity building, Entity prefab)
+        {
+            bool hasRenters = EntityManager.TryGetBuffer(building, true, out DynamicBuffer<Renter> renters);
+            if (!hasRenters || EntityManager.HasComponent<Game.Buildings.Park>(building))
+                return EntityManager.HasComponent<Employee>(building)
+                    && EntityManager.HasComponent<WorkProvider>(building);
+
+            if (renters.Length == 0)
+            {
+                if (EntityManager.HasComponent<Employee>(building)
+                    && EntityManager.HasComponent<WorkProvider>(building))
+                    return true;
+
+                if (EntityManager.TryGetComponent(prefab, out SpawnableBuildingData spawnable)
+                    && m_PrefabSystem.TryGetPrefab<ZonePrefab>(spawnable.m_ZonePrefab, out ZonePrefab zonePrefab))
+                {
+                    return zonePrefab.m_AreaType == Game.Zones.AreaType.Commercial
+                        || zonePrefab.m_AreaType == Game.Zones.AreaType.Industrial;
+                }
+
+                return false;
+            }
+
+            for (int i = 0; i < renters.Length; i++)
+            {
+                Entity renter = renters[i].m_Renter;
+                if (EntityManager.HasComponent<CompanyData>(renter))
+                    return EntityManager.HasComponent<Employee>(renter)
+                        && EntityManager.HasComponent<WorkProvider>(renter);
+            }
+            return false;
+        }
+
+        private Entity GetWorkplaceEntity(Entity building)
+        {
+            if (!EntityManager.HasComponent<Game.Buildings.Park>(building)
+                && EntityManager.TryGetBuffer(building, true, out DynamicBuffer<Renter> renters))
+            {
+                for (int i = 0; i < renters.Length; i++)
+                {
+                    Entity renter = renters[i].m_Renter;
+                    if (EntityManager.HasComponent<CompanyData>(renter))
+                        return renter;
+                }
+            }
+            return building;
         }
 
         private uint GeometryHash(Entity area)
@@ -366,6 +478,10 @@ private static float IntersectionArea(DynamicBuffer<Node> aNodes, DynamicBuffer<
             writer.PropertyName("households"); writer.Write(stats.HouseholdCount);
             writer.PropertyName("maxHouseholds"); writer.Write(stats.MaxHouseholds);
             writer.PropertyName("animals"); writer.Write(stats.PetCount);
+            writer.PropertyName("employeeCount"); writer.Write(m_EmployeeCount);
+            writer.PropertyName("maxEmployees"); writer.Write(m_MaxEmployees);
+            writer.PropertyName("educationDataEmployees"); writer.Write(m_EducationDataEmployees);
+            writer.PropertyName("educationDataWorkplaces"); writer.Write(m_EducationDataWorkplaces);
             writer.PropertyName("ageData"); writer.Write(stats.Age);
             writer.PropertyName("educationData"); writer.Write(stats.Education);
             writer.PropertyName("density"); writer.Write(m_Area > 0f ? (int)(m_StatsPopulation() * 1000000f / m_Area) : 0);
@@ -373,6 +489,16 @@ private static float IntersectionArea(DynamicBuffer<Node> aNodes, DynamicBuffer<
             writer.PropertyName("unassignedResidents"); writer.Write(m_UnassignedResidents);
             writer.PropertyName("unassignedDensity"); writer.Write(m_UnassignedDensity);
             writer.PropertyName("districts"); WriteRows(writer, m_Districts);
+            writer.PropertyName("districtAreas");
+            writer.ArrayBegin((uint)m_Districts.Count);
+            for (int i = 0; i < m_Districts.Count; i++)
+                writer.Write(m_Districts[i].Area);
+            writer.ArrayEnd();
+            writer.PropertyName("districtResidents");
+            writer.ArrayBegin((uint)m_Districts.Count);
+            for (int i = 0; i < m_Districts.Count; i++)
+                writer.Write(m_Districts[i].Residents);
+            writer.ArrayEnd();
         }
 
         private int m_StatsPopulation()
@@ -389,9 +515,6 @@ private static float IntersectionArea(DynamicBuffer<Node> aNodes, DynamicBuffer<
                 writer.TypeBegin("selectedInfo.District");
                 writer.PropertyName("entity"); writer.Write(row.Entity);
                 writer.PropertyName("name"); m_NameSystem.BindName(writer, row.Entity);
-                writer.PropertyName("area"); writer.Write(row.Area);
-                writer.PropertyName("residents"); writer.Write(row.Residents);
-                writer.PropertyName("density"); writer.Write(row.Area > 0f ? (int)(row.Residents * 1000000f / row.Area) : 0);
                 writer.TypeEnd();
             }
             writer.ArrayEnd();

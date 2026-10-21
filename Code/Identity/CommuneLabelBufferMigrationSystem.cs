@@ -6,6 +6,7 @@ using Game.Areas;
 using Game.Common;
 using Game.Policies;
 using Game.Prefabs;
+using Game.Rendering;
 using Game.SceneFlow;
 using Game.Tools;
 using Game.UI;
@@ -19,6 +20,7 @@ public partial class CommuneLabelBufferMigrationSystem : GameSystemBase
     {
         private EntityQuery m_CommuneQuery;
         private EntityQuery m_AreaCandidatesQuery;
+        private AreaBufferSystem m_AreaBufferSystem;
         private readonly HashSet<Entity> m_InitializedCommunes = new HashSet<Entity>();
         private bool m_LoadingComplete;
         private bool m_MigrationComplete;
@@ -28,6 +30,7 @@ public partial class CommuneLabelBufferMigrationSystem : GameSystemBase
         protected override void OnCreate()
         {
             base.OnCreate();
+            m_AreaBufferSystem = World.GetOrCreateSystemManaged<AreaBufferSystem>();
             m_CommuneQuery = GetEntityQuery(ComponentType.ReadOnly<Commune>(),
                 ComponentType.ReadOnly<Area>(), ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Temp>());
             m_AreaCandidatesQuery = GetEntityQuery(new EntityQueryDesc
@@ -133,6 +136,7 @@ RemoveIfPresent<District>(entity);
         {
             NativeArray<Entity> communes = m_CommuneQuery.ToEntityArray(Allocator.Temp);
             int repaired = 0;
+            bool dependenciesCompleted = false;
             try
             {
                 for (int i = 0; i < communes.Length; i++)
@@ -142,6 +146,12 @@ RemoveIfPresent<District>(entity);
 
 if (!firstSeen)
                         continue;
+
+                    if (!dependenciesCompleted)
+                    {
+                        CommuneSystemDependency.Complete(m_AreaBufferSystem);
+                        dependenciesCompleted = true;
+                    }
 
                     bool changed = false;
                     if (EntityManager.HasComponent<Hidden>(commune))
@@ -167,7 +177,7 @@ if (!firstSeen)
 
 if (EntityManager.TryGetComponent(commune, out PrefabRef prefabRef)
                         && EntityManager.Exists(prefabRef.m_Prefab)
-                        && EntityManager.HasComponent<AreaColorData>(prefabRef.m_Prefab))
+                        && EntityManager.HasComponent<Game.Prefabs.AreaColorData>(prefabRef.m_Prefab))
                     {
                         EntityManager.SetComponentData(prefabRef.m_Prefab, CommuneAreaPrefab.GetCommuneColorData());
                     }

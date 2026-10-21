@@ -2,13 +2,15 @@ import React from "react";
 import { getModule, type ModRegistrar } from "cs2/modding";
 import { selectedInfo } from "cs2/bindings";
 import { LocalizedEntityName, useLocalization, type Name } from "cs2/l10n";
+import toolIconUrl from "../../Resources/Icons/tool.svg";
 
 type Entity = { index: number; version: number };
-type CommuneRow = { entity: Entity; name: Name; area?: number; residents?: number; density?: number; serviceIcon?: string | null };
+type CommuneRow = { entity: Entity; name: Name; area?: number; residents?: number; density?: number };
 type CommunePanelProps = {
     group: string; area: number; residents: number; households: number; maxHouseholds: number; animals: number; density: number;
+    employeeCount: number; maxEmployees: number; educationDataEmployees: { values: number[]; total: number }; educationDataWorkplaces: { values: number[]; total: number };
     unassignedArea: number; unassignedResidents: number; unassignedDensity: number;
-    districts: CommuneRow[]; language: number; units: number; ageData: { values: number[]; total: number }; educationData: { values: number[]; total: number };
+    districts: CommuneRow[]; districtAreas: number[]; districtResidents: number[]; language: number; units: number; ageData: { values: number[]; total: number }; educationData: { values: number[]; total: number };
 };
 type DistrictAreaProps = { area: number; density: number; language: number; units: number };
 type WealthProps = { group: string; language: number; householdCount: number; maxHouseholds: number; residentCount: number; petCount: number; wealthKey: string; wealthData: { income: number; rent: number; upkeep: number; resourceCost: number; fees: number } };
@@ -20,6 +22,7 @@ const InfoSectionFoldout: any = getModule("game-ui/game/components/selected-info
 const FormattedParagraphs: any = getModule("game-ui/common/text/formatted-paragraphs.tsx", "FormattedParagraphs");
 const NativeTooltip: any = getModule("game-ui/common/tooltip/tooltip.tsx", "Tooltip");
 const InfoSectionDivider: any = getModule("game-ui/game/components/selected-info-panel/shared-components/info-section/info-section.tsx", "Divider");
+const NativeEmployeesSection: any = getModule("game-ui/game/components/selected-info-panel/selected-info-sections/building-sections/employees-section.tsx", "EmployeesSection");
 const InfoBarChart: any = getModule("game-ui/common/charts/bar-chart/info-bar-chart.tsx", "InfoBarChart");
 const AgeChart: any = getModule("game-ui/common/charts/pie-chart/age-pie-chart.tsx", "agePieChartColors");
 const AgeChartLabels: any = getModule("game-ui/common/charts/pie-chart/age-pie-chart.tsx", "agePieChartLabels");
@@ -63,6 +66,7 @@ const getLabels = (language: number) => {
 
 return uiText[Math.min(Math.max(language || 1, 1), 12)];
 };
+const selectEntity = (entity: Entity) => selectedInfo.selectEntity(entity);
 const FoldoutHeader = ({ label, right }: { label: string; right?: React.ReactNode }) =>
     InfoRow ? <InfoRow left={label} right={right} uppercase disableFocus /> : <span style={{ textTransform: "uppercase" }}>{label}{right != null && <span style={{ float: "right" }}>{right}</span>}</span>;
 const getFormatters = (units: number, gameUnitSystem: number, language: number) => {
@@ -81,8 +85,8 @@ const NativeLink = ({ entity, children }: { entity: Entity; children: React.Reac
     const [hovered, setHovered] = React.useState(false);
     const name = <span style={{ color: hovered ? "#b8e9ff" : undefined, textShadow: hovered ? "0 0 5px #54cfff99" : undefined, transition: "color 100ms ease, text-shadow 100ms ease" }}>{children}</span>;
     return <span style={{ display: "inline-block", maxWidth: "100%" }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-        {InfoLink ? React.createElement(InfoLink, { onSelect: () => selectedInfo.selectEntity(entity) }, name)
-            : <button style={{ color: hovered ? "#b8e9ff" : "#65bfff", background: "transparent", border: 0, padding: 0, cursor: "pointer" }} onClick={() => selectedInfo.selectEntity(entity)}>⌕ {name}</button>}
+        {InfoLink ? React.createElement(InfoLink, { onSelect: () => selectEntity(entity) }, name)
+            : <button style={{ color: hovered ? "#b8e9ff" : "#65bfff", background: "transparent", border: 0, padding: 0, cursor: "pointer" }} onClick={() => selectEntity(entity)}>⌕ {name}</button>}
     </span>;
 };
 
@@ -92,11 +96,15 @@ const CommunePanelSection = (props: CommunePanelProps) => {
     const language = Math.min(Math.max(props.language || 1, 1), 12);
     const help = areaDensityHelp[Math.min(Math.max(props.language || 1, 1), 12)];
     const { number, area, density } = getFormatters(props.units, 0, props.language);
-    const sortedDistricts = [...props.districts].sort((a, b) => nameSortKey(a.name, localization).localeCompare(nameSortKey(b.name, localization), undefined, { sensitivity: "base", numeric: true }));
+    const sortedDistricts = props.districts.map((district, index) => ({
+        ...district,
+        area: props.districtAreas?.[index] ?? 0,
+        residents: props.districtResidents?.[index] ?? 0,
+        density: (props.districtAreas?.[index] ?? 0) > 0
+            ? Math.round((props.districtResidents?.[index] ?? 0) * 1_000_000 / props.districtAreas[index]) : 0,
+    })).sort((a, b) => nameSortKey(a.name, localization).localeCompare(nameSortKey(b.name, localization), undefined, { sensitivity: "base", numeric: true }));
     return <div style={{ boxSizing: "border-box", width: "100%", minWidth: 0 }}>
-        {InfoSectionFoldout ? <InfoSectionFoldout header={<FoldoutHeader label={t[0]} />} initialExpanded={true} disableFocus tooltip={FormattedParagraphs && <FormattedParagraphs>{[
-            "The communal territory and its residents.", "The communal territory and its residents.", "Le territoire de la commune et ses habitants.", "El territorio municipal y sus habitantes.", "Il territorio comunale e i suoi abitanti.", "市辖区及其居民。", "Das Gemeindegebiet und seine Einwohner.", "自治体の区域と住民。", "Terytorium gminy i jej mieszkańcy.", "O território municipal e os seus habitantes.", "시 자치구역과 주민입니다.", "Территория коммуны и её жители.", "市政區域及其居民。"
-        ][language]}</FormattedParagraphs>}>
+        <img src={toolIconUrl} aria-hidden="true" style={{ display: "none" }} />
         {InfoRow && <>
             <InfoSection disableFocus tooltip={<>
                 <FormattedParagraphs>{[
@@ -114,15 +122,21 @@ const CommunePanelSection = (props: CommunePanelProps) => {
                 <InfoRow left={language === 2 ? "POPULATION" : ["POPULATION", "POPULATION", "POPULATION", "POBLACIÓN", "POPOLAZIONE", "人口", "BEVÖLKERUNG", "人口", "LUDNOŚĆ", "POPULAÇÃO", "인구", "НАСЕЛЕНИЕ", "人口"][language]} right={<LocalizedNumber value={props.residents} unit="integer" />} uppercase disableFocus />
                 {props.animals > 0 && <InfoRow icon="Media/Game/Icons/Pet.svg" left={<LocalizedNumber value={props.animals} unit="integer" />} subRow disableFocus />}
             </InfoSection>
+            <InfoSection disableFocus>
             <NativeTooltip direction="right" alignment="center" tooltip={FormattedParagraphs && <FormattedParagraphs>{[
                 "Occupied homes compared with the total housing capacity of this commune.", "Occupied homes compared with the total housing capacity of this commune.", "Logements occupés par rapport à la capacité totale de cette commune.", "Viviendas ocupadas respecto a la capacidad total del municipio.", "Abitazioni occupate rispetto alla capacità totale del comune.", "本市辖区已入住住宅与住宅总容量的对比。", "Belegte Wohnungen im Verhältnis zur gesamten Wohnkapazität der Gemeinde.", "自治体の総住宅数に対する居住中の住宅数です。", "Zajęte mieszkania w stosunku do całkowitej pojemności mieszkaniowej gminy.", "Habitações ocupadas em relação à capacidade total desta comuna.", "시 자치구역의 총 주택 수 대비 거주 중인 주택 수입니다.", "Занятые дома относительно общей жилой вместимости коммуны.", "已入住住宅與市政區域總住宅容量的比較。"
             ][language]}</FormattedParagraphs>}>
                 <InfoRow left={<Loc.SelectedInfoPanel.HOUSEHOLDS />} right={<><LocalizedNumber value={props.households} unit="integer" />{" / "}<LocalizedNumber value={props.maxHouseholds} unit="integer" /></>} uppercase disableFocus />
             </NativeTooltip>
-            <InfoRow left={t[3]} right={area(props.area)} uppercase disableFocus tooltip={FormattedParagraphs && <FormattedParagraphs>{help[0]}</FormattedParagraphs>} />
-            <InfoRow left={t[4]} right={density(props.density)} uppercase disableFocus tooltip={FormattedParagraphs && <FormattedParagraphs>{help[1]}</FormattedParagraphs>} />
+            </InfoSection>
+            {(props.maxEmployees > 0 || props.employeeCount > 0) && NativeEmployeesSection && <NativeEmployeesSection group="CommuneEmployees" tooltipKeys={[]} tooltipTags={[]}
+                employeeCount={props.employeeCount} maxEmployees={props.maxEmployees}
+                educationDataEmployees={props.educationDataEmployees} educationDataWorkplaces={props.educationDataWorkplaces} />}
+            <InfoSection disableFocus>
+                <InfoRow left={t[3]} right={area(props.area)} uppercase disableFocus tooltip={FormattedParagraphs && <FormattedParagraphs>{help[0]}</FormattedParagraphs>} />
+                <InfoRow left={t[4]} right={density(props.density)} uppercase disableFocus tooltip={FormattedParagraphs && <FormattedParagraphs>{help[1]}</FormattedParagraphs>} />
+            </InfoSection>
         </>}
-        </InfoSectionFoldout> : null}
         {InfoSectionFoldout ? <InfoSectionFoldout header={<FoldoutHeader label={t[1]} right={number(props.districts.length)} />} initialExpanded={false} disableFocus tooltip={FormattedParagraphs && <FormattedParagraphs>{[
             "List of districts intersecting this commune. Population, area, and density shown for each district count only the part inside this commune.", "List of districts intersecting this commune. Population, area, and density shown for each district count only the part inside this commune.", "Liste des quartiers intersectant le périmètre de cette commune. La population, la superficie et la densité indiquées pour chaque quartier ne concernent que sa partie située dans la commune.", "Lista de barrios que se cruzan con este municipio. La población, superficie y densidad de cada barrio solo cuentan la parte situada dentro del municipio.", "Elenco dei quartieri che intersecano questo comune. Popolazione, superficie e densità mostrate considerano solo la parte interna al comune.", "与本市辖区相交的行政区列表。每个行政区显示的人口、面积和密度仅统计位于本市辖区内的部分。", "Liste der Bezirke, die diese Gemeinde überschneiden. Einwohnerzahl, Fläche und Dichte beziehen sich jeweils nur auf den Teil innerhalb der Gemeinde.", "自治体の範囲と重なる地区の一覧です。各地区の人口、面積、密度は自治体内にある部分のみを集計します。", "Lista dzielnic przecinających się z tą gminą. Podane populacja, powierzchnia i gęstość obejmują tylko część leżącą w granicach gminy.", "Lista dos bairros que se cruzam com esta comuna. A população, área e densidade apresentadas incluem apenas a parte dentro da comuna.", "시 자치구역과 겹치는 구역 목록입니다. 각 구역의 인구, 면적, 밀도는 자치구역 안에 포함된 부분만 집계합니다.", "Список районов, пересекающих коммуну. Указаны население, площадь и плотность только части внутри коммуны.", "與此市政區域相交的行政區列表。每個行政區的人口、面積和密度僅統計市政區域內的部分。"
         ][language]}</FormattedParagraphs>}>
@@ -133,7 +147,7 @@ const CommunePanelSection = (props: CommunePanelProps) => {
             <InfoRow left={t[5]} right={number(props.unassignedResidents)} disableFocus />
             <InfoRow left="" right={<>{area(props.unassignedArea)} · {density(props.unassignedDensity)}</>} subRow subRowDimmed disableFocus />
         </InfoSectionFoldout> : null}
-        <div style={{ height: "1rem", background: "rgba(255,255,255,0.2)", margin: "3rem 10rem" }} />
+        <div aria-hidden="true" style={{ height: "0.2rem", background: "rgba(255,255,255,0.24)", margin: "0.25rem 0" }} />
     </div>;
 };
 

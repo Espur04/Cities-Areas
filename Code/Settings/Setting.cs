@@ -20,7 +20,7 @@ namespace Communes
         Game, Metric, Imperial
     }
 
-    [FileLocation(nameof(Communes))]
+    [FileLocation("CitiesAreas")]
     [SettingsUIGroupOrder(kGeneralGroup, kShortcutGroup)]
     [SettingsUIShowGroupName(kGeneralGroup, kShortcutGroup)]
     [SettingsUIKeyboardAction(Mod.kToggleToolActionName, ActionType.Button,
@@ -116,6 +116,7 @@ namespace Communes
                 [m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleToolBinding))] = text[11],
                 [m_Setting.GetBindingKeyLocaleID(Mod.kToggleToolActionName)] = text[12],
                 [m_Setting.GetBindingMapLocaleID()] = text[13],
+                ["SelectedInfoPanel.TOOLTIP[CommuneEmployees]"] = LocaleText.EmployeeTooltip(selectedLocale),
             };
             string[] ui = LocaleText.UiFor(selectedLocale);
             string[] uiKeys = { "Territory", "Districts", "Population", "Area", "Density", "NoDistrict", "DistrictTerritory" };
@@ -159,6 +160,29 @@ private static readonly string[][] s_Text =
             new[] { "Муниципальная территория", "Районы", "Население", "Площадь", "Плотность", "Без района", "Площадь района" },
             new[] { "市政區域", "行政區", "人口", "面積", "人口密度", "未分配行政區", "行政區面積" },
         };
+
+        private static readonly string[] s_EmployeeTooltips =
+        {
+            "Employees and open positions in buildings within this commune, grouped by education level. Workplace capacity depends on building type, size, zoning and density. Open positions are filled by citizens with the matching education level; unfilled positions reduce building efficiency.",
+            "Employés et postes ouverts dans les bâtiments de cette commune, répartis par niveau d’instruction. La capacité d’emploi dépend du type, de la taille, du zonage et de la densité des bâtiments. Les postes sont pourvus par des citoyens ayant le niveau d’instruction correspondant ; les postes vacants réduisent l’efficacité des bâtiments.",
+            "Empleados y puestos vacantes en los edificios de este municipio, agrupados por nivel educativo. La capacidad de empleo depende del tipo, el tamaño, la zonificación y la densidad de los edificios. Los puestos se cubren con ciudadanos que tienen el nivel educativo correspondiente; las vacantes reducen la eficiencia de los edificios.",
+            "Dipendenti e posti vacanti negli edifici di questo comune, suddivisi per livello d’istruzione. La capacità lavorativa dipende dal tipo, dalle dimensioni, dalla zona e dalla densità degli edifici. I posti sono occupati da cittadini con il livello d’istruzione corrispondente; quelli vacanti riducono l’efficienza degli edifici.",
+            "本市辖区内建筑的员工和空缺岗位，按教育水平分类。工作岗位容量取决于建筑类型、规模、分区和密度。空缺岗位会由具备相应教育水平的市民填补；岗位空缺会降低建筑效率。",
+            "Beschäftigte und offene Stellen in den Gebäuden dieser Gemeinde, aufgeschlüsselt nach Bildungsniveau. Die Arbeitsplatzkapazität hängt von Gebäudetyp, Größe, Zonierung und Dichte ab. Offene Stellen werden von Einwohnern mit passendem Bildungsniveau besetzt; unbesetzte Stellen verringern die Effizienz der Gebäude.",
+            "この自治体内の建物で働く従業員と求人を、教育レベル別に表示します。職場の定員は建物の種類、規模、ゾーニング、密度によって決まります。求人は該当する教育レベルの市民で補われ、未充足の職場は建物の効率を低下させます。",
+            "Pracownicy i wolne miejsca pracy w budynkach tej gminy, pogrupowani według poziomu wykształcenia. Liczba miejsc pracy zależy od typu i wielkości budynku, strefy oraz gęstości zabudowy. Wolne miejsca zajmują mieszkańcy z odpowiednim wykształceniem; nieobsadzone stanowiska obniżają wydajność budynków.",
+            "Empregados e vagas nos edifícios desta comuna, agrupados por nível de educação. A capacidade de emprego depende do tipo, tamanho, zoneamento e densidade dos edifícios. As vagas são preenchidas por cidadãos com o nível de educação correspondente; vagas não preenchidas reduzem a eficiência dos edifícios.",
+            "이 자치구역 건물의 직원과 공석을 교육 수준별로 표시합니다. 일자리 수용량은 건물 유형, 크기, 용도 구역 및 밀도에 따라 달라집니다. 공석은 해당 교육 수준을 갖춘 시민이 채우며, 채워지지 않은 일자리는 건물 효율을 낮춥니다.",
+            "Число сотрудников и открытых рабочих мест в зданиях этой коммуны с разбивкой по уровню образования. Вместимость рабочих мест зависит от типа и размера здания, зонирования и плотности застройки. Вакансии занимают жители с подходящим уровнем образования; незанятые места снижают эффективность зданий.",
+            "此市政區域建築中的員工與職缺，依教育程度分類。工作場所容量取決於建築類型、規模、分區與密度。職缺會由具備相應教育程度的市民填補；未填補的職缺會降低建築效率。"
+        };
+
+        public static string EmployeeTooltip(string locale)
+        {
+            for (int i = 0; i < s_Languages.Length; i++)
+                if (s_Languages[i] == locale) return s_EmployeeTooltips[i];
+            return s_EmployeeTooltips[0];
+        }
         private static readonly string[] s_Languages = { "en-US", "fr-FR", "es-ES", "it-IT", "zh-HANS", "de-DE", "ja-JP", "pl-PL", "pt-BR", "ko-KR", "ru-RU", "zh-HANT" };
         public static string ForLanguage(InterfaceLanguage language, string gameLocale)
         {

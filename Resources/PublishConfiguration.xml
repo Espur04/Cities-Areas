@@ -5,30 +5,61 @@
 	<LongDescription>
 		## EN
 
-		**Cities Areas** adds an independent municipal boundary system to Cities: Skylines II. Create municipalities with the dedicated **Municipal Areas** tool and manage them alongside the game’s districts.
+		**Cities Areas** adds an independent municipal boundary system to Cities: Skylines II. Create and manage municipalities alongside the game’s existing districts using the dedicated **Municipal Areas** tool.
 
-		Draw a boundary by placing points on the map, then adjust its outline by moving or adding points. Existing districts remain visible while you work, and you can align municipal boundaries with their edges. District boundaries are protected from edits made in the Municipal Areas tool.
+		### Create and Edit Municipalities
 
-		Municipalities form a second layer of territorial membership. A building can contribute to its municipality while remaining part of its original district. Drawing a municipal boundary across buildings does not demolish them or change their district membership.
+		Draw a municipality by placing points on the map, then adjust its outline by moving or adding points. Existing district boundaries remain visible while you work, allowing you to align municipal boundaries with them. District boundaries are protected from edits made through the Municipal Areas tool.
 
-		Select a municipality to view its information panel. It shows the municipality’s population, household occupancy, animal count, average wealth and happiness, along with area, population density, and resident age and education breakdowns. The district section lists districts intersecting the municipality and shows the population, area, and density located inside its boundary. Select a district from that list to open its own panel. Districts keep their own population totals.
+		### Independent Territorial Membership
 
-		The mod also adds area and density information to district panels. Settings let you choose the interface language and area units, or set a keyboard shortcut to open and close the tool. **Ctrl+M** is the default shortcut.
+		Municipalities introduce a second layer of territorial membership. Buildings can contribute to their municipality’s statistics while remaining part of their original district. Drawing municipal boundaries across buildings does not demolish them or change their district membership.
 
-		## FR
-		**Cities Areas** ajoute un système indépendant de limites communales à Cities: Skylines II. Créez des communes avec l’outil dédié **Zones communales** et gérez-les en parallèle des quartiers du jeu.
+		### Municipal and District Information
 
-		Tracez une commune en plaçant des points sur la carte, puis ajustez son contour en déplaçant ou en ajoutant des points. Les quartiers existants restent visibles pendant le tracé, et vous pouvez aligner les limites communales sur leurs contours. L’outil Zones communales ne permet pas de modifier le tracé des quartiers.
+		Select a municipality to open its information panel. View its population, household occupancy, employees and open positions by education level, animal count, average wealth and happiness, as well as its area, population density, and resident age and education breakdowns.
 
-		Les communes constituent une seconde appartenance territoriale. Un bâtiment peut être comptabilisé dans sa commune tout en restant dans son quartier d’origine. Le tracé d’une limite communale à travers des bâtiments ne les détruit pas et ne modifie pas leur appartenance au quartier.
+		The district section lists districts intersecting the municipality and displays the population, area, and density within its boundaries. Select a district from the list to open its information panel. Districts retain their own total population figures.
 
-		Sélectionnez une commune pour ouvrir son panneau d’information. Vous y trouverez sa population, ses ménages, ses animaux, sa richesse moyenne et son bonheur, ainsi que sa superficie, sa densité et la répartition des résidents par âge et niveau d’éducation. La section des quartiers répertorie ceux qui intersectent la commune et affiche la population, la superficie et la densité comprises à l’intérieur de ses limites. Sélectionnez un quartier dans la liste pour ouvrir son propre panneau. Les quartiers conservent leur population totale.
+		Cities Areas also adds area and population density information to the game’s existing district panels.
 
-		Le mod ajoute également la superficie et la densité aux panneaux des quartiers. Dans les paramètres, choisissez la langue de l’interface, les unités de superficie et le raccourci pour ouvrir ou fermer l’outil. **Ctrl+M** est le raccourci par défaut.
+		### Settings
+
+		Choose the interface language and area units, or configure a keyboard shortcut to open and close the Municipal Areas tool. **Ctrl+M** is the default shortcut.
 
 		Author: espur04 (Discord)
 
 		Source Code: https://github.com/Espur04/Cities-Areas
+
+		---
+
+		## FR
+
+		**Cities Areas** ajoute un système indépendant de limites communales à Cities: Skylines II. Créez et gérez des communes en parallèle des quartiers existants du jeu grâce à l’outil dédié **Zones communales**.
+
+		### Créer et modifier des communes
+
+		Tracez une commune en plaçant des points sur la carte, puis ajustez son contour en déplaçant ou en ajoutant des points. Les limites des quartiers existants restent visibles pendant le tracé, ce qui vous permet d’aligner les limites communales sur leurs contours. L’outil Zones communales ne permet pas de modifier les limites des quartiers.
+
+		### Une appartenance territoriale indépendante
+
+		Les communes constituent une seconde couche d’appartenance territoriale. Un bâtiment peut être comptabilisé dans les statistiques de sa commune tout en restant dans son quartier d’origine. Le tracé d’une limite communale à travers des bâtiments ne les détruit pas et ne modifie pas leur appartenance au quartier.
+
+		### Informations sur les communes et les quartiers
+
+		Sélectionnez une commune pour ouvrir son panneau d’information. Consultez sa population, ses ménages, ses employés et postes ouverts par niveau d’instruction, son nombre d’animaux, sa richesse moyenne et son bonheur, ainsi que sa superficie, sa densité de population et la répartition des résidents par âge et niveau d’éducation.
+
+		La section des quartiers répertorie ceux qui intersectent la commune et affiche la population, la superficie et la densité comprises dans ses limites. Sélectionnez un quartier dans la liste pour ouvrir son propre panneau d’information. Les quartiers conservent leurs chiffres de population totale.
+
+		Cities Areas ajoute également la superficie et la densité de population aux panneaux des quartiers existants du jeu.
+
+		### Paramètres
+
+		Choisissez la langue de l’interface et les unités de superficie, ou configurez un raccourci clavier pour ouvrir et fermer l’outil Zones communales. **Ctrl+M** est le raccourci par défaut.
+
+		Auteur : espur04 (Discord)
+
+		Code source : https://github.com/Espur04/Cities-Areas
 	</LongDescription>
 	<Thumbnail Value="Resources/Thumbnail.png" />
 	<Screenshot Value="Resources/Screenshots/image1.png" />
@@ -36,15 +67,15 @@
 	<Screenshot Value="Resources/Screenshots/image3.png" />
 	<Screenshot Value="Resources/Screenshots/image4.png" />
 	<Tag Value="Code Mod" />
-	<Tag Value="Tools" />
-	<Tag Value="UI" />
-	<Tag Value="Districts" />
 	<ForumLink Value="" />
-	<ModVersion Value="1.1.0" />
+	<ModVersion Value="1.1.2" />
 	<GameVersion Value="1.6.2f1" />
 	<Dependency Id="" />
 	<RequiredDLC Value="" />
 	<ChangeLog>
+## 1.1.2
+Added employee counts, workplace capacity, and education breakdowns to municipality panels. Improved municipal boundary visibility with yellow outlines, refined panel layout and hover styling, and fixed several display and statistics refresh issues.
+
 ## 1.1.0
 Added municipal population breakdowns and district intersection statistics. Improved population, household, happiness, and wealth panels, refreshed statistics more responsively, and updated interface localization.
 

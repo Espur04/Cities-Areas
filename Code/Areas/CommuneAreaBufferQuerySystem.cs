@@ -104,7 +104,8 @@ public partial class CommuneAreaBufferQuerySystem : GameSystemBase
                     ComponentType.ReadOnly<Node>(), ComponentType.ReadOnly<Triangle>(),
                     ComponentType.ReadOnly<LabelExtents>(), ComponentType.ReadOnly<LabelVertex>() },
                 Any = new[] { ComponentType.ReadOnly<Updated>(),
-                    ComponentType.ReadOnly<BatchesUpdated>(), ComponentType.ReadOnly<Deleted>() }
+                    ComponentType.ReadOnly<BatchesUpdated>(), ComponentType.ReadOnly<Deleted>() },
+                None = Array.Empty<ComponentType>()
             };
         }
 
@@ -208,7 +209,10 @@ if (forceUpdated && EntityManager.HasComponent<Updated>(commune))
             {
                 object slot = m_Slots.GetValue((int)type);
                 if (slot != null)
+                {
+                    CommuneSystemDependency.Complete(m_AreaBufferSystem);
                     m_BufferDataDirtyField.SetValue(slot, true);
+                }
             }
         }
 
@@ -216,6 +220,7 @@ if (forceUpdated && EntityManager.HasComponent<Updated>(commune))
         {
             if (m_Patched && m_SpaceSlot != null)
             {
+                CommuneSystemDependency.Complete(m_AreaBufferSystem);
                 m_AreaQueryField.SetValue(m_SpaceSlot, m_OriginalAreaQuery);
                 m_UpdatedQueryField.SetValue(m_SpaceSlot, m_OriginalUpdatedQuery);
                 m_Slots.SetValue(m_SpaceSlot, (int)AreaType.Space);
